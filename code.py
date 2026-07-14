@@ -1,22 +1,114 @@
 import time
 import board
 import analogio
+import math
+
 import adafruit_ble
 from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 from adafruit_ble.services.standard.hid import HIDService
+
 from adafruit_hid.consumer_control import ConsumerControl
 from adafruit_hid.consumer_control_code import ConsumerControlCode
 
-# =========================
-# ADC
-# =========================
+import adafruit_dotstar
+
+
+# =========================================================
+# DOTSTAR LED
+# =========================================================
+
+led = adafruit_dotstar.DotStar(board.APA102_SCK, board.APA102_MOSI, 1, brightness=0.08)
+
+
+def set_led(r, g, b):
+    # kompensacja czerwonego kanału
+    r = int(r / 2)
+    led[0] = (r, g, b)
+
+
+# =========================================================
+# LED ENGINE
+# =========================================================
+
+rainbow_phase = 0.0
+
+in_flash = False
+flash_until = 0
+
+
+def rainbow():
+    """
+    Płynna tęcza.
+    """
+
+    global rainbow_phase
+
+    r = (math.sin(rainbow_phase) + 1) * 127
+    g = (math.sin(rainbow_phase + 2.094) + 1) * 127
+    b = (math.sin(rainbow_phase + 4.188) + 1) * 127
+
+    rainbow_phase += 0.03
+
+    return int(r), int(g), int(b)
+
+
+def update_led():
+    global in_flash
+    now = time.monotonic()
+
+    # flash ma priorytet
+    if in_flash and now < flash_until:
+        return
+
+    in_flash = False
+
+    if ble.connected:
+        set_led(*rainbow())
+    else:
+        # oczekiwanie na BLE
+        set_led(0, 0, 255)
+
+
+def flash(duration=0.2):
+    global in_flash, flash_until
+
+    in_flash = True
+    flash_until = time.monotonic() + duration
+
+    set_led(255, 255, 255)
+
+
+# =========================================================
+# BLE HID
+# =========================================================
+
+ble = adafruit_ble.BLERadio()
+ble.name = "Bulbulator"
+
+
+hid = HIDService()
+advertisement = ProvideServicesAdvertisement(hid)
+advertisement.complete_name = "Bulbulator"
+advertisement.appearance = 961
+cc = ConsumerControl(hid.devices)
+
+
+def send(action):
+    if action == "NEXT":
+        cc.send(ConsumerControlCode.SCAN_NEXT_TRACK)
+    elif action == "PREV":
+        cc.send(ConsumerControlCode.SCAN_PREVIOUS_TRACK)
+    elif action == "PLAYPAUSE":
+        cc.send(ConsumerControlCode.PLAY_PAUSE)
+
+
+# =========================================================
+# ADC SWC
+# =========================================================
 
 adc = analogio.AnalogIn(board.A0)
-print("ADC reference voltage:", adc.reference_voltage, "V")
 
-# =========================
-# FILTR ADC
-# =========================
+print("ADC reference voltage:", adc.reference_voltage, "V")
 
 MOVING_AVG_SIZE = 10
 samples = []
@@ -24,66 +116,43 @@ samples = []
 
 def read_adc_filtered():
     """
-    Zwraca uśrednione napięcie ADC w mV.
+    Odczyt ADC -> mV
     """
-    value = adc.value
-    samples.append(value)
+    raw = adc.value
+    samples.append(raw)
+
     if len(samples) > MOVING_AVG_SIZE:
         samples.pop(0)
+
     avg = sum(samples) / len(samples)
     voltage_mv = avg * adc.reference_voltage * 1000 / 65535
+
     return voltage_mv
 
 
-# =========================
-# PROGI MAZDA RX-8 SWC
+# =========================================================
+# MAZDA RX-8 SWC
 #
-# napięcia po dzielniku 1:1
+# Po dzielniku 1:1:
 #
-# 2200 mV  NONE
-# 1600 mV  PREV
-# 1200 mV  NEXT
+# 2200 mV -> NONE
+# 1600 mV -> PREV
+# 1200 mV -> NEXT
 #
-# 850 mV i 500 mV ignorowane
-# =========================
+# =========================================================
 
-THRESH_NONE = 1900  # mV
-THRESH_PREV = 1400  # mV
-THRESH_NEXT = 1000  # mV
+THRESH_NONE = 1900
+THRESH_PREV = 1400
+THRESH_NEXT = 1000
 
-# =========================
-# DEBOUNCE
-# =========================
+DEBOUNCE_TIME = 0.12
 
-DEBOUNCE_TIME = 0.15
 last_state = "NONE"
 stable_state = "NONE"
 last_change_time = 0
 
-# =========================
-# BLE HID
-# =========================
-
-ble = adafruit_ble.BLERadio()
-hid = HIDService()
-advertisement = ProvideServicesAdvertisement(hid)
-cc = ConsumerControl(hid.devices)
-
-
-def send_media_key(action):
-    if action == "NEXT":
-        cc.send(ConsumerControlCode.NEXT_TRACK)
-    elif action == "PREV":
-        cc.send(ConsumerControlCode.PREVIOUS_TRACK)
-
-# =========================
-# DETEKCJA
-# =========================
 
 def detect_state(voltage_mv):
-    """
-    Mapowanie napięcia [mV] -> przycisk.
-    """
     if voltage_mv > THRESH_NONE:
         return "NONE"
     elif voltage_mv > THRESH_PREV:
@@ -91,50 +160,81 @@ def detect_state(voltage_mv):
     elif voltage_mv > THRESH_NEXT:
         return "NEXT"
     else:
-        # pozostałe poziomy drabinki
+        # pozostałe poziomy drabinki ignorowane
         return "NONE"
 
 
-# =========================
-# TEST NAPIĘCIA STARTOWEGO
-# =========================
+# =========================================================
+# START
+# =========================================================
 
-time.sleep(0.5)
-startup_voltage = read_adc_filtered()
-print("Initial SWC voltage:", round(startup_voltage, 1), "mV")
-
-# =========================
-# START BLE
-# =========================
-
-print("Mazda RX-8 BLE SWC controller start")
+print("Bulbulator start")
 ble.start_advertising(advertisement)
 
-# =========================
+
+# startowo niebieski
+set_led(0, 0, 255)
+
+
+# =========================================================
 # MAIN LOOP
-# =========================
+# =========================================================
 
 while True:
+
+    # -----------------------------------------------------
+    # Czekanie na BLE
+    # -----------------------------------------------------
+
     while not ble.connected:
-        time.sleep(0.2)
+        update_led()
+        time.sleep(0.1)
+
     print("BLE connected")
+
+    rainbow_phase = 0.0
+
+    last_state = "NONE"
+    stable_state = "NONE"
+
+    last_change_time = time.monotonic()
+
+    # -----------------------------------------------------
+    # Połączony
+    # -----------------------------------------------------
+
     while ble.connected:
         now = time.monotonic()
+
+        # LED
+        update_led()
+
+        # ADC
         voltage = read_adc_filtered()
-        current_state = detect_state(voltage)
-        if current_state != last_state:
+        state = detect_state(voltage)
+
+        # debounce
+
+        if state != last_state:
+            last_state = state
             last_change_time = now
-            last_state = current_state
-        else:
-            if (now - last_change_time) > DEBOUNCE_TIME:
-                if stable_state != current_state:
-                    stable_state = current_state
-                    if stable_state == "NEXT":
-                        print("NEXT TRACK", round(voltage, 0), "mV")
-                        send_media_key("NEXT")
-                    elif stable_state == "PREV":
-                        print("PREV TRACK", round(voltage, 0), "mV")
-                        send_media_key("PREV")
-        time.sleep(0.02)
+
+        if (now - last_change_time) > DEBOUNCE_TIME:
+            if state != stable_state:
+                stable_state = state
+                if stable_state == "NEXT":
+                    print("NEXT", round(voltage), "mV")
+                    flash()
+                    send("NEXT")
+                elif stable_state == "PREV":
+                    print("PREV", round(voltage), "mV")
+                    flash()
+                    send("PREV")
+        time.sleep(0.007)
+
+    # -----------------------------------------------------
+    # Rozłączenie
+    # -----------------------------------------------------
+
     print("BLE disconnected")
     ble.start_advertising(advertisement)
