@@ -87,29 +87,39 @@ ble = adafruit_ble.BLERadio()
 ble.name = "Bulbulator"
 
 hid = HIDService(
-    hid_descriptor=bytes((
-        0x05, 0x0C,       # Consumer Devices
-        0x09, 0x01,       # Consumer Control
-        0xA1, 0x01,
-
-        0x85, 0x03,       # Report ID 3
-
-        0x15, 0x00,
-        0x25, 0x01,
-        0x75, 0x01,
-        0x95, 0x10,
-
-        0x09, 0xB5,       # Next Track
-        0x09, 0xB6,       # Previous Track
-        0x09, 0xCD,       # Play/Pause
-
-        0x81, 0x02,
-
-        0x95, 0x0D,
-        0x81, 0x03,
-
-        0xC0
-    ))
+    hid_descriptor=bytes(
+        (
+            0x05,
+            0x0C,  # Consumer Devices
+            0x09,
+            0x01,  # Consumer Control
+            0xA1,
+            0x01,
+            0x85,
+            0x03,  # Report ID 3
+            0x15,
+            0x00,
+            0x25,
+            0x01,
+            0x75,
+            0x01,
+            0x95,
+            0x10,
+            0x09,
+            0xB5,  # Next Track
+            0x09,
+            0xB6,  # Previous Track
+            0x09,
+            0xCD,  # Play/Pause
+            0x81,
+            0x02,
+            0x95,
+            0x0D,
+            0x81,
+            0x03,
+            0xC0,
+        )
+    )
 )
 advertisement = ProvideServicesAdvertisement(hid)
 advertisement.complete_name = "Bulbulator"
