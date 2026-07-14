@@ -1,6 +1,7 @@
 import time
 import board
 import analogio
+import digitalio
 import math
 import sys
 
@@ -18,7 +19,12 @@ import adafruit_dotstar
 # DOTSTAR LED
 # =========================================================
 
-led = adafruit_dotstar.DotStar(board.APA102_SCK, board.APA102_MOSI, 1, brightness=0.08)
+led = adafruit_dotstar.DotStar(
+    board.APA102_SCK,
+    board.APA102_MOSI,
+    1,
+    brightness=0.08
+)
 
 
 def set_led(r, g, b):
@@ -55,6 +61,7 @@ def rainbow():
 
 def update_led():
     global in_flash
+
     now = time.monotonic()
 
     # flash ma priorytet
@@ -86,38 +93,21 @@ def flash(duration=0.2):
 ble = adafruit_ble.BLERadio()
 ble.name = "Bulbulator"
 
-hid = HIDService(
-    hid_descriptor=bytes((
-        0x05, 0x0C,        # Usage Page (Consumer)
-        0x09, 0x01,        # Usage (Consumer Control)
-        0xA1, 0x01,        # Collection (Application)
+hid = HIDService()
 
-        0x85, 0x01,        # Report ID (1)
-
-        0x15, 0x00,        # Logical Minimum
-        0x25, 0x01,        # Logical Maximum
-        0x75, 0x01,        # Report Size
-        0x95, 0x10,        # Report Count (16 bits)
-
-        0x09, 0xB5,        # Scan Next Track
-        0x09, 0xB6,        # Scan Previous Track
-        0x09, 0xCD,        # Play/Pause
-
-        0x81, 0x02,        # Input
-
-        0xC0               # End Collection
-    ))
-)
 advertisement = ProvideServicesAdvertisement(hid)
 advertisement.complete_name = "Bulbulator"
+
 cc = ConsumerControl(hid.devices)
 
 
 def send(action):
     if action == "NEXT":
         cc.send(ConsumerControlCode.SCAN_NEXT_TRACK)
+
     elif action == "PREV":
         cc.send(ConsumerControlCode.SCAN_PREVIOUS_TRACK)
+
     elif action == "PLAYPAUSE":
         cc.send(ConsumerControlCode.PLAY_PAUSE)
 
@@ -128,11 +118,12 @@ def send(action):
 
 adc = analogio.AnalogIn(board.A0)
 
-reference_voltage = adc.reference_voltage  # is float
+reference_voltage = adc.reference_voltage
 print("ADC reference voltage:", reference_voltage, "V")
 
+
 if reference_voltage > 3.4 or reference_voltage < 3.2:
-    print("Reference voltage out of the expected range: should be 3.3V")
+    print("Reference voltage out of expected range: should be 3.3V")
     set_led(127, 0, 0)
     sys.exit(2)
 
@@ -152,35 +143,22 @@ def read_adc_filtered():
 
     avg = sum(samples) / len(samples)
     voltage_mv = avg * reference_voltage * 1000 / 65535
-
     return voltage_mv
 
 
 # =========================================================
 # MAZDA RX-8 SWC
-#
-# Po dzielniku 1:1:
-#
-#  200 mV -> VOL- (przybliżone)
-#  500 mV -> VOL+
-# 0850 mV -> PREV
-# 1200 mV -> NEXT
-# 1600 mV -> MODE
-# 1950 mV -> VOICE (przybliżone)
-# 2200 mV -> NO BUTTON
-#
 # =========================================================
 
-THRESH_PREV = 650  # 0-650 mV -> NONE, 650-1000 mV -> PREV
-THRESH_NEXT = 1000  # 1000-1400 mV -> NEXT
-THRESH_NONE = 1400  # 1400+ mV -> NONE
+THRESH_PREV = 650
+THRESH_NEXT = 1000
+THRESH_NONE = 1400
 
 DEBOUNCE_TIME = 0.12
 
 last_state = "NONE"
 stable_state = "NONE"
 last_change_time = 0
-
 
 def detect_state(voltage_mv):
     if voltage_mv > THRESH_NONE:
@@ -190,8 +168,21 @@ def detect_state(voltage_mv):
     elif voltage_mv > THRESH_PREV:
         return "PREV"
     else:
-        # pozostałe poziomy drabinki ignorowane
         return "NONE"
+
+
+# =========================================================
+# USER BUTTON
+# =========================================================
+
+button = digitalio.DigitalInOut(board.SWITCH)
+
+button.direction = digitalio.Direction.INPUT
+button.pull = digitalio.Pull.UP
+
+button_last = True
+button_debounce_time = 0
+BUTTON_DEBOUNCE = 0.12
 
 
 # =========================================================
@@ -199,12 +190,9 @@ def detect_state(voltage_mv):
 # =========================================================
 
 print("Bulbulator start")
+
 ble.start_advertising(advertisement)
-
-
-# startowo niebieski
 set_led(0, 0, 255)
-
 
 # =========================================================
 # MAIN LOOP
@@ -228,6 +216,7 @@ while True:
     stable_state = "NONE"
 
     last_change_time = time.monotonic()
+    button_last = True
 
     # -----------------------------------------------------
     # Połączony
@@ -235,15 +224,32 @@ while True:
 
     while ble.connected:
         now = time.monotonic()
-
-        # LED
         update_led()
 
-        # ADC
+        # -------------------------------------------------
+        # USER BUTTON -> NEXT
+        # -------------------------------------------------
+
+        button_state = button.value
+
+        if not button_state and button_last:
+            if now - button_debounce_time > BUTTON_DEBOUNCE:
+                print("USER BUTTON -> NEXT")
+
+                flash()
+                send("NEXT")
+                button_debounce_time = now
+
+        button_last = button_state
+
+        # -------------------------------------------------
+        # ADC SWC
+        # -------------------------------------------------
+
         voltage = read_adc_filtered()
         state = detect_state(voltage)
 
-        # debounce
+        # debounce kierownicy
 
         if state != last_state:
             last_state = state
@@ -252,14 +258,17 @@ while True:
         if (now - last_change_time) > DEBOUNCE_TIME:
             if state != stable_state:
                 stable_state = state
+
                 if stable_state == "NEXT":
                     print("NEXT", round(voltage), "mV")
                     flash()
                     send("NEXT")
+    
                 elif stable_state == "PREV":
                     print("PREV", round(voltage), "mV")
                     flash()
                     send("PREV")
+
         time.sleep(0.007)
 
     # -----------------------------------------------------
