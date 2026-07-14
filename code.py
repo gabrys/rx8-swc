@@ -2,6 +2,7 @@ import time
 import board
 import analogio
 import math
+import sys
 
 import adafruit_ble
 from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
@@ -108,7 +109,13 @@ def send(action):
 
 adc = analogio.AnalogIn(board.A0)
 
-print("ADC reference voltage:", adc.reference_voltage, "V")
+reference_voltage = adc.reference_voltage  # is float
+print("ADC reference voltage:", reference_voltage, "V")
+
+if reference_voltage > 3.4 or reference_voltage < 3.2:
+    print("Reference voltage out of the expected range: should be 3.3V")
+    set_led(127, 0, 0)
+    sys.exit(2)
 
 MOVING_AVG_SIZE = 10
 samples = []
@@ -125,7 +132,7 @@ def read_adc_filtered():
         samples.pop(0)
 
     avg = sum(samples) / len(samples)
-    voltage_mv = avg * adc.reference_voltage * 1000 / 65535
+    voltage_mv = avg * reference_voltage * 1000 / 65535
 
     return voltage_mv
 
