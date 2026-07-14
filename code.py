@@ -142,15 +142,19 @@ def read_adc_filtered():
 #
 # Po dzielniku 1:1:
 #
-# 2200 mV -> NONE
-# 1600 mV -> PREV
+# 0200 mV -> VOL- (przybliżone)
+# 0500 mV -> VOL+
+# 0850 mV -> PREV
 # 1200 mV -> NEXT
+# 1600 mV -> MODE
+# 1950 mV -> VOICE (przybliżone)
+# 2200 mV -> NO BUTTON
 #
 # =========================================================
 
-THRESH_NONE = 1900
-THRESH_PREV = 1400
+THRESH_NONE = 1400
 THRESH_NEXT = 1000
+THRESH_PREV = 650
 
 DEBOUNCE_TIME = 0.12
 
@@ -162,10 +166,10 @@ last_change_time = 0
 def detect_state(voltage_mv):
     if voltage_mv > THRESH_NONE:
         return "NONE"
-    elif voltage_mv > THRESH_PREV:
-        return "PREV"
     elif voltage_mv > THRESH_NEXT:
         return "NEXT"
+    elif voltage_mv > THRESH_PREV:
+        return "PREV"
     else:
         # pozostałe poziomy drabinki ignorowane
         return "NONE"
