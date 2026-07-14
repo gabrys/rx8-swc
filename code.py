@@ -90,7 +90,7 @@ ble.name = "Bulbulator"
 hid = HIDService()
 advertisement = ProvideServicesAdvertisement(hid)
 advertisement.complete_name = "Bulbulator"
-advertisement.appearance = 961
+advertisement.appearance = 0  # 961 powoduje, że się pokazuje kursor
 cc = ConsumerControl(hid.devices)
 
 
