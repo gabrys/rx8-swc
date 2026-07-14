@@ -164,8 +164,8 @@ def read_adc_filtered():
 #
 # Po dzielniku 1:1:
 #
-# 0200 mV -> VOL- (przybliżone)
-# 0500 mV -> VOL+
+#  200 mV -> VOL- (przybliżone)
+#  500 mV -> VOL+
 # 0850 mV -> PREV
 # 1200 mV -> NEXT
 # 1600 mV -> MODE
@@ -174,9 +174,9 @@ def read_adc_filtered():
 #
 # =========================================================
 
-THRESH_NONE = 1400
-THRESH_NEXT = 1000
-THRESH_PREV = 650
+THRESH_PREV = 650  # 0-650 mV -> NONE, 650-1000 mV -> PREV
+THRESH_NEXT = 1000  # 1000-1400 mV -> NEXT
+THRESH_NONE = 1400  # 1400+ mV -> NONE
 
 DEBOUNCE_TIME = 0.12
 
