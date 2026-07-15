@@ -116,10 +116,11 @@ def send(action):
 # ADC SWC
 # =========================================================
 
-adc = analogio.AnalogIn(board.A5)
+adc = analogio.AnalogIn(board.A4)
 
 reference_voltage = adc.reference_voltage
 print("ADC reference voltage:", reference_voltage, "V")
+print("Current voltage:", adc.value * reference_voltage / 65535, "V")
 
 
 if reference_voltage > 3.4 or reference_voltage < 3.2:
@@ -162,13 +163,13 @@ last_change_time = 0
 
 def detect_state(voltage_mv):
     if voltage_mv > THRESH_NONE:
-        return "NONE"
+        return "NONE_HI"
     elif voltage_mv > THRESH_NEXT:
         return "NEXT"
     elif voltage_mv > THRESH_PREV:
         return "PREV"
     else:
-        return "NONE"
+        return "NONE_LOW"
 
 
 # =========================================================
@@ -263,11 +264,14 @@ while True:
                     print("NEXT", round(voltage), "mV")
                     flash()
                     send("NEXT")
-    
+
                 elif stable_state == "PREV":
                     print("PREV", round(voltage), "mV")
                     flash()
                     send("PREV")
+                
+                else:
+                    print(stable_state, round(voltage), "mV")
 
         time.sleep(0.007)
 
