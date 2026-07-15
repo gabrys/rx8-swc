@@ -116,7 +116,7 @@ def send(action):
 # ADC SWC
 # =========================================================
 
-adc = analogio.AnalogIn(board.A0)
+adc = analogio.AnalogIn(board.A5)
 
 reference_voltage = adc.reference_voltage
 print("ADC reference voltage:", reference_voltage, "V")
