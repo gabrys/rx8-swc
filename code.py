@@ -125,10 +125,10 @@ print("Current voltage:", adc.value * reference_voltage / 65535, "V")
 
 if reference_voltage > 3.4 or reference_voltage < 3.2:
     print("Reference voltage out of expected range: should be 3.3V")
-    set_led(127, 0, 0)
+    set_led(255, 0, 0)
     sys.exit(2)
 
-MOVING_AVG_SIZE = 10
+MOVING_AVG_SIZE = 5
 samples = []
 
 
