@@ -23,7 +23,7 @@ led = adafruit_dotstar.DotStar(
     board.APA102_SCK,
     board.APA102_MOSI,
     1,
-    brightness=0.08
+    brightness=0.08,
 )
 
 
