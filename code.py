@@ -1,18 +1,18 @@
+import time
+import board
+import analogio
+import digitalio
 import math
 import sys
-import time
-
-import analogio
-import board
-import digitalio
-import microcontroller
 
 import adafruit_ble
 from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 from adafruit_ble.services.standard.hid import HIDService
-import adafruit_dotstar
+
 from adafruit_hid.consumer_control import ConsumerControl
 from adafruit_hid.consumer_control_code import ConsumerControlCode
+
+import adafruit_dotstar
 
 
 # =========================================================
@@ -23,7 +23,7 @@ led = adafruit_dotstar.DotStar(
     board.APA102_SCK,
     board.APA102_MOSI,
     1,
-    brightness=0.08,
+    brightness=0.08
 )
 
 
@@ -102,15 +102,12 @@ cc = ConsumerControl(hid.devices)
 
 
 def send(action):
-    print("Sending", action)
     if action == "NEXT":
         cc.send(ConsumerControlCode.SCAN_NEXT_TRACK)
+
     elif action == "PREV":
         cc.send(ConsumerControlCode.SCAN_PREVIOUS_TRACK)
-    elif action == "PLAY":
-        cc.send(0x00B0)
-    elif action == "PAUSE":
-        cc.send(0x00B1)
+
     elif action == "PLAYPAUSE":
         cc.send(ConsumerControlCode.PLAY_PAUSE)
 
@@ -129,10 +126,9 @@ print("Current voltage:", adc.value * reference_voltage / 65535, "V")
 if reference_voltage > 3.4 or reference_voltage < 3.2:
     print("Reference voltage out of expected range: should be 3.3V")
     set_led(255, 0, 0)
-    time.sleep(5)
-    microcontroller.reset()
+    sys.exit(2)
 
-MOVING_AVG_SIZE = 3
+MOVING_AVG_SIZE = 5
 samples = []
 
 
@@ -160,8 +156,10 @@ THRESH_NEXT = 1000
 THRESH_NONE = 1400
 
 DEBOUNCE_TIME = 0.12
-DOUBLE_PRESS_TIME = 0.4
 
+last_state = "NONE"
+stable_state = "NONE"
+last_change_time = 0
 
 def detect_state(voltage_mv):
     if voltage_mv > THRESH_NONE:
@@ -183,7 +181,7 @@ button = digitalio.DigitalInOut(board.SWITCH)
 button.direction = digitalio.Direction.INPUT
 button.pull = digitalio.Pull.UP
 
-button_last = False
+button_last = True
 button_debounce_time = 0
 BUTTON_DEBOUNCE = 0.12
 
@@ -195,113 +193,91 @@ BUTTON_DEBOUNCE = 0.12
 print("Bulbulator start")
 
 ble.start_advertising(advertisement)
-
-rainbow_phase = 0.0
-
-last_state = "NONE"
-stable_state = "NONE"
-last_next_press = 0.0
-last_prev_press = 0.0
-
-last_change_time = time.monotonic()
-button_last = False
+set_led(0, 0, 255)
 
 # =========================================================
 # MAIN LOOP
 # =========================================================
 
-try:
-    # reset board on any exception below:
-    while True:
+while True:
 
-        # -----------------------------------------------------
-        # Czekanie na BLE
-        # -----------------------------------------------------
+    # -----------------------------------------------------
+    # Czekanie na BLE
+    # -----------------------------------------------------
 
-        while not ble.connected:
-            update_led()
-            time.sleep(0.1)
+    while not ble.connected:
+        update_led()
+        time.sleep(0.1)
 
-        print("BLE connected")
+    print("BLE connected")
 
-        # -----------------------------------------------------
-        # Połączony
-        # -----------------------------------------------------
+    rainbow_phase = 0.0
 
-        while ble.connected:
-            now = time.monotonic()
-            update_led()
+    last_state = "NONE"
+    stable_state = "NONE"
 
-            # -------------------------------------------------
-            # USER BUTTON -> PLAYPAUSE
-            # -------------------------------------------------
+    last_change_time = time.monotonic()
+    button_last = True
 
-            button_state = button.value
+    # -----------------------------------------------------
+    # Połączony
+    # -----------------------------------------------------
 
-            if not button_state and button_last:
-                if now - button_debounce_time > BUTTON_DEBOUNCE:
-                    print("USER BUTTON -> PLAYPAUSE")
+    while ble.connected:
+        now = time.monotonic()
+        update_led()
 
+        # -------------------------------------------------
+        # USER BUTTON -> NEXT
+        # -------------------------------------------------
+
+        button_state = button.value
+
+        if not button_state and button_last:
+            if now - button_debounce_time > BUTTON_DEBOUNCE:
+                print("USER BUTTON -> NEXT")
+
+                flash()
+                send("NEXT")
+                button_debounce_time = now
+
+        button_last = button_state
+
+        # -------------------------------------------------
+        # ADC SWC
+        # -------------------------------------------------
+
+        voltage = read_adc_filtered()
+        state = detect_state(voltage)
+
+        # debounce kierownicy
+
+        if state != last_state:
+            last_state = state
+            last_change_time = now
+
+        if (now - last_change_time) > DEBOUNCE_TIME:
+            if state != stable_state:
+                stable_state = state
+
+                if stable_state == "NEXT":
+                    print("NEXT", round(voltage), "mV")
                     flash()
-                    send("PLAYPAUSE")
-                    button_debounce_time = now
+                    send("NEXT")
 
-            button_last = button_state
-
-            # -------------------------------------------------
-            # ADC SWC
-            # -------------------------------------------------
-
-            voltage = read_adc_filtered()
-            state = detect_state(voltage)
-
-            # debounce kierownicy
-
-            if state != last_state:
-                last_state = state
-                last_change_time = now
-
-            if (now - last_change_time) > DEBOUNCE_TIME:
-                if state != stable_state:
-                    stable_state = state
+                elif stable_state == "PREV":
+                    print("PREV", round(voltage), "mV")
+                    flash()
+                    send("PREV")
+                
+                else:
                     print(stable_state, round(voltage), "mV")
 
-                    if stable_state == "NEXT":
-                        flash()
+        time.sleep(0.007)
 
-                        if now - last_next_press > DOUBLE_PRESS_TIME:
-                            send("PLAY")
-                        else:
-                            send("NEXT")
+    # -----------------------------------------------------
+    # Rozłączenie
+    # -----------------------------------------------------
 
-                        last_next_press = now
-
-                    elif stable_state == "PREV":
-                        flash()
-
-                        if now - last_prev_press > DOUBLE_PRESS_TIME:
-                            send("PAUSE")
-                        else:
-                            send("PREV")
-
-                        last_prev_press = now
-
-            time.sleep(0.007)
-
-        # -----------------------------------------------------
-        # Rozłączenie
-        # -----------------------------------------------------
-
-        print("BLE disconnected")
-        ble.start_advertising(advertisement)
-
-except Exception as e:
-    print(type(e).__name__, e)
-
-    try:
-        set_led(255, 0, 0)
-    except Exception:
-        pass
-
-    time.sleep(5)
-    microcontroller.reset()
+    print("BLE disconnected")
+    ble.start_advertising(advertisement)
