@@ -150,15 +150,15 @@ THRESH_NONE = 1400
 
 def detect_state(voltage_mv):
     if voltage_mv < THRESH_PREV:
-        return "PREV"
+        return "NONE_LO"
 
     if voltage_mv < THRESH_NEXT:
-        return "NEXT"
+        return "PREV"
 
     if voltage_mv < THRESH_NONE:
-        return "NONE"
+        return "NEXT"
 
-    return "NONE"
+    return "NONE_HI"
 
 
 # ============================================================
