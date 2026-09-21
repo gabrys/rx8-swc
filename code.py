@@ -4,13 +4,13 @@ import time
 import analogio
 import board
 import digitalio
-import microcontroller
 
 import adafruit_ble
 from adafruit_ble.services.standard.hid import HIDService
 from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
-from adafruit_ble.consumer_control import ConsumerControl
-from adafruit_ble.consumer_control_code import ConsumerControlCode
+
+from adafruit_hid.consumer_control import ConsumerControl
+from adafruit_hid.consumer_control_code import ConsumerControlCode
 
 import adafruit_dotstar
 
@@ -134,10 +134,8 @@ reference_voltage = adc.reference_voltage
 def read_adc_voltage_mv():
     raw = adc.value
 
-    # Wynik zawsze w mV
-    voltage_mv = raw * reference_voltage * 1000 / 65535
-
-    return voltage_mv
+    # Zawsze zwracamy mV
+    return raw * reference_voltage * 1000 / 65535
 
 
 # ============================================================
@@ -258,8 +256,9 @@ while True:
                 last_state = state
                 last_change_time = now
 
-            # Brak debounce SWC.
-            # Reakcja następuje natychmiast po zmianie stanu.
+            # Bez debounce SWC.
+            # Reagujemy natychmiast na zmianę stanu.
+
             if state != stable_state:
                 stable_state = state
 
@@ -285,7 +284,6 @@ while True:
 
         ble.start_advertising(advertisement)
 
-        # Reset stanów po rozłączeniu
         last_state = "NONE"
         stable_state = "NONE"
         button_last = False
@@ -301,7 +299,6 @@ while True:
 
         time.sleep(5)
 
-        # Restart BLE
         try:
             ble.stop_advertising()
         except Exception:
