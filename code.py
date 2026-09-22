@@ -148,6 +148,7 @@ voltage_print_counter = 0
 # Start BLE advertising
 
 ble.start_advertising(advertisement)
+print("BLE advertising started")
 
 
 try:
@@ -155,7 +156,10 @@ try:
         update_led()
         time.sleep(0.1)
 
+    print("BLE connected")
+
     while ble.connected:
+        time.sleep(0.01)
         update_led()
 
         voltage_mv = read_adc_voltage_mv()
@@ -193,6 +197,7 @@ try:
             elif previous_state == "VOL_DOWN":
                 flash()
                 cc.send(0x00B1)  # PAUSE
+            
 
     print("BLE disconnected, resetting...")
 
