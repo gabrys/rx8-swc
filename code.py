@@ -67,15 +67,15 @@ def update_led():
 # ADC
 
 adc = analogio.AnalogIn(board.A4)
-reference_voltage = adc.reference_voltage
+reference_voltage = adc.reference_voltage * 1000
 
 
 def read_adc_voltage_mv():
     raw = adc.value
-    return round(raw * reference_voltage * 1000 / 65535)
+    return round(raw * reference_voltage / 65535)
 
 
-print("ADC reference voltage:", reference_voltage, "V")
+print("ADC reference voltage:", round(reference_voltage), "mV")
 
 print(
     "Current voltage:",
@@ -83,10 +83,10 @@ print(
     "mV"
 )
 
-if reference_voltage > 3.4 or reference_voltage < 3.2:
+if reference_voltage > 3400 or reference_voltage < 3200:
     print(
         "Reference voltage out of expected range: "
-        "should be 3.3V"
+        "should be 3300 mV"
     )
 
     set_led(255, 0, 255)
@@ -123,6 +123,28 @@ advertisement = ProvideServicesAdvertisement(hid)
 advertisement.complete_name = "Bulbulator"
 
 cc = ConsumerControl(hid.devices)
+
+
+last_code_sent = None
+
+
+def send(code):
+    global last_code_sent
+
+    if code == 0x00B1:
+        if last_code_sent == 0x00B1:
+            return
+
+        flash()
+
+        cc.send(0x00B0)  # PLAY
+        cc.send(0x00CD)  # PLAY_PAUSE
+
+    else:
+        flash()
+        cc.send(code)
+
+    last_code_sent = code
 
 
 # Steering wheel button state detection
@@ -168,36 +190,25 @@ try:
         voltage_print_counter += 1
 
         if voltage_print_counter >= 200:
-            print(
-                "Voltage:",
-                voltage_mv,
-                "mV",
-                "State:",
-                state,
-            )
+            print(state, voltage_mv, "mV")
             voltage_print_counter = 0
 
         if state != previous_state:
             previous_state = state
 
-            print(previous_state, voltage_mv, "mV")
+            print(state, voltage_mv, "mV")
 
-            if previous_state == "NEXT":
-                flash()
-                cc.send(0x00B5)  # NEXT_TRACK
+            if state == "NEXT":
+                send(0x00B5)  # NEXT_TRACK
 
-            elif previous_state == "PREV":
-                flash()
-                cc.send(0x00B6)  # PREV_TRACK
+            elif state == "PREV":
+                send(0x00B6)  # PREV_TRACK
 
-            elif previous_state == "VOL_UP":
-                flash()
-                cc.send(0x00B0)  # PLAY
+            elif state == "VOL_UP":
+                send(0x00B0)  # PLAY
 
-            elif previous_state == "VOL_DOWN":
-                flash()
-                cc.send(0x00B1)  # PAUSE
-            
+            elif state == "VOL_DOWN":
+                send(0x00B1)  # PAUSE
 
     print("BLE disconnected, resetting...")
 
