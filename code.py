@@ -3,21 +3,18 @@ import time
 
 import analogio
 import board
-import digitalio
+import microcontroller
 
 import adafruit_ble
 from adafruit_ble.services.standard.hid import HIDService
 from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 
 from adafruit_hid.consumer_control import ConsumerControl
-from adafruit_hid.consumer_control_code import ConsumerControlCode
 
 import adafruit_dotstar
 
 
-# ============================================================
 # LED
-# ============================================================
 
 dotstar = adafruit_dotstar.DotStar(
     board.DOTSTAR_CLOCK,
@@ -31,6 +28,9 @@ flash_until = 0
 
 
 def set_led(r, g, b):
+    # Compensate for the red LED channel being noticeably brighter.
+    r = r // 2
+
     dotstar[0] = (r, g, b)
 
 
@@ -64,40 +64,60 @@ def update_led():
         set_led(0, 0, 255)
 
 
-# ============================================================
-# BLE HID - Consumer Control only
-# ============================================================
+# ADC
+
+adc = analogio.AnalogIn(board.A4)
+reference_voltage = adc.reference_voltage
+
+
+def read_adc_voltage_mv():
+    raw = adc.value
+    return round(raw * reference_voltage * 1000 / 65535)
+
+
+print("ADC reference voltage:", reference_voltage, "V")
+
+print(
+    "Current voltage:",
+    read_adc_voltage_mv(),
+    "mV"
+)
+
+if reference_voltage > 3.4 or reference_voltage < 3.2:
+    print(
+        "Reference voltage out of expected range: "
+        "should be 3.3V"
+    )
+
+    set_led(255, 0, 255)
+
+    time.sleep(5)
+    microcontroller.reset()
+
+
+# BLE HID Consumer Control only
 
 CONSUMER_CONTROL_DESCRIPTOR = bytes(
     (
         0x05, 0x0C,       # Usage Page (Consumer)
         0x09, 0x01,       # Usage (Consumer Control)
         0xA1, 0x01,       # Collection (Application)
-
         0x85, 0x01,       # Report ID (1)
-
         0x75, 0x10,       # Report Size (16 bits)
         0x95, 0x01,       # Report Count (1)
-
         0x15, 0x01,       # Logical Minimum (1)
         0x26, 0x8C, 0x02, # Logical Maximum (652)
-
         0x19, 0x01,       # Usage Minimum (1)
         0x2A, 0x8C, 0x02, # Usage Maximum (652)
-
         0x81, 0x00,       # Input (Data, Array, Absolute)
-
         0xC0,             # End Collection
     )
 )
 
-
 ble = adafruit_ble.BLERadio()
 ble.name = "Bulbulator"
 
-hid = HIDService(
-    hid_descriptor=CONSUMER_CONTROL_DESCRIPTOR
-)
+hid = HIDService(hid_descriptor=CONSUMER_CONTROL_DESCRIPTOR)
 
 advertisement = ProvideServicesAdvertisement(hid)
 advertisement.complete_name = "Bulbulator"
@@ -105,212 +125,85 @@ advertisement.complete_name = "Bulbulator"
 cc = ConsumerControl(hid.devices)
 
 
-def send(action):
-    if action == "NEXT":
-        cc.send(ConsumerControlCode.SCAN_NEXT_TRACK)
-
-    elif action == "PREV":
-        cc.send(ConsumerControlCode.SCAN_PREVIOUS_TRACK)
-
-    elif action == "PLAY":
-        cc.send(ConsumerControlCode.PLAY)
-
-    elif action == "PAUSE":
-        cc.send(ConsumerControlCode.PAUSE)
-
-    elif action == "PLAYPAUSE":
-        cc.send(ConsumerControlCode.PLAY_PAUSE)
-
-
-# ============================================================
-# ADC
-# ============================================================
-
-adc = analogio.AnalogIn(board.A4)
-
-reference_voltage = adc.reference_voltage
-
-
-def read_adc_voltage_mv():
-    raw = adc.value
-
-    # Zawsze zwracamy mV
-    return raw * reference_voltage * 1000 / 65535
-
-
-# ============================================================
-# Steering wheel thresholds
-# Wszystkie wartości w mV
-# ============================================================
-
-THRESH_PREV = 650
-THRESH_NEXT = 1000
-THRESH_NONE = 1400
-
+# Steering wheel button state detection
 
 def detect_state(voltage_mv):
-    if voltage_mv < THRESH_PREV:
+    if voltage_mv < 100:
         return "NONE_LO"
-
-    if voltage_mv < THRESH_NEXT:
+    if voltage_mv < 350:
+        return "VOL_DOWN"
+    if voltage_mv < 675:
+        return "VOL_UP"
+    if voltage_mv < 1025:
         return "PREV"
-
-    if voltage_mv < THRESH_NONE:
+    if voltage_mv < 1400:
         return "NEXT"
-
     return "NONE_HI"
 
 
-# ============================================================
-# Physical button
-# ============================================================
-
-button = digitalio.DigitalInOut(board.SWITCH)
-button.direction = digitalio.Direction.INPUT
-button.pull = digitalio.Pull.UP
-
-button_last = False
-button_debounce_time = 0
-BUTTON_DEBOUNCE = 0.12
+previous_state = "NONE_HI"
+voltage_print_counter = 0
 
 
-# ============================================================
-# State
-# ============================================================
-
-last_state = "NONE"
-stable_state = "NONE"
-
-last_change_time = time.time()
-last_voltage_print = time.time()
-
-
-# ============================================================
-# Start BLE
-# ============================================================
+# Start BLE advertising
 
 ble.start_advertising(advertisement)
 
-set_led(0, 0, 255)
+
+try:
+    while not ble.connected:
+        update_led()
+        time.sleep(0.1)
+
+    while ble.connected:
+        update_led()
+
+        voltage_mv = read_adc_voltage_mv()
+        state = detect_state(voltage_mv)
+
+        voltage_print_counter += 1
+
+        if voltage_print_counter >= 200:
+            print(
+                "Voltage:",
+                voltage_mv,
+                "mV",
+                "State:",
+                state,
+            )
+            voltage_print_counter = 0
+
+        if state != previous_state:
+            previous_state = state
+
+            print(previous_state, voltage_mv, "mV")
+
+            if previous_state == "NEXT":
+                flash()
+                cc.send(0x00B5)  # NEXT_TRACK
+
+            elif previous_state == "PREV":
+                flash()
+                cc.send(0x00B6)  # PREV_TRACK
+
+            elif previous_state == "VOL_UP":
+                flash()
+                cc.send(0x00B0)  # PLAY
+
+            elif previous_state == "VOL_DOWN":
+                flash()
+                cc.send(0x00B1)  # PAUSE
+
+    print("BLE disconnected, resetting...")
+
+    set_led(255, 255, 0)
+
+except Exception as e:
+    print("Error:", e)
+    print("Resetting...")
+
+    set_led(255, 0, 0)
 
 
-# ============================================================
-# Main loop
-# ============================================================
-
-while True:
-
-    try:
-
-        # ----------------------------------------------------
-        # Waiting for BLE connection
-        # ----------------------------------------------------
-
-        while not ble.connected:
-            update_led()
-            time.sleep(0.1)
-
-        # ----------------------------------------------------
-        # Connected
-        # ----------------------------------------------------
-
-        while ble.connected:
-
-            now = time.time()
-
-            # LED / rainbow effect
-            update_led()
-
-            # ------------------------------------------------
-            # Read voltage
-            # ------------------------------------------------
-
-            voltage_mv = read_adc_voltage_mv()
-
-            # Raportowanie napięcia co sekundę
-            if now - last_voltage_print >= 1.0:
-                print("Voltage:", round(voltage_mv), "mV")
-                last_voltage_print = now
-
-            # ------------------------------------------------
-            # Physical button -> PLAY/PAUSE
-            # ------------------------------------------------
-
-            button_pressed = not button.value
-
-            if button_pressed and not button_last:
-                if now - button_debounce_time >= BUTTON_DEBOUNCE:
-                    flash()
-                    send("PLAYPAUSE")
-                    button_debounce_time = now
-
-            button_last = button_pressed
-
-            # ------------------------------------------------
-            # Steering wheel buttons
-            # ------------------------------------------------
-
-            state = detect_state(voltage_mv)
-
-            if state != last_state:
-                last_state = state
-                last_change_time = now
-
-            # Bez debounce SWC.
-            # Reagujemy natychmiast na zmianę stanu.
-
-            if state != stable_state:
-                stable_state = state
-
-                print(
-                    stable_state,
-                    round(voltage_mv),
-                    "mV"
-                )
-
-                if stable_state == "NEXT":
-                    flash()
-                    send("NEXT")
-
-                elif stable_state == "PREV":
-                    flash()
-                    send("PREV")
-
-        # ----------------------------------------------------
-        # Disconnected
-        # ----------------------------------------------------
-
-        set_led(0, 0, 255)
-
-        ble.start_advertising(advertisement)
-
-        last_state = "NONE"
-        stable_state = "NONE"
-        button_last = False
-
-        last_change_time = time.time()
-        last_voltage_print = time.time()
-
-    except Exception as e:
-
-        print("Error:", e)
-
-        set_led(255, 0, 0)
-
-        time.sleep(5)
-
-        try:
-            ble.stop_advertising()
-        except Exception:
-            pass
-
-        last_state = "NONE"
-        stable_state = "NONE"
-        button_last = False
-
-        last_change_time = time.time()
-        last_voltage_print = time.time()
-
-        set_led(0, 0, 255)
-
-        ble.start_advertising(advertisement)
+time.sleep(1)
+microcontroller.reset()
